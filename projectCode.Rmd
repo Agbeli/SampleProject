@@ -1,0 +1,337 @@
+---
+title: "STAT 5060: Sample Design Assignment 6"
+author: "Emmanuel Agbeli"
+output: pdf_document
+date: "04-04-2025"
+header-includes:
+  - \usepackage[utf8]{inputenc}
+  - \usepackage{textcomp}
+  - \DeclareUnicodeCharacter{2212}{\ensuremath{-}}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+library(ggplot2)
+library(tidyverse)
+```
+
+### Analysis of BMI information collected at BGSU. 
+
+This source code to our project analysis of BMI index of BGSU students. The goal is estimates average and bound of proportion of BMI given their each levels. 
+
+
+```{r,echo=TRUE}
+library(readxl)
+
+data_BMI <- read_excel("StatFinalSurvey2.xlsx")
+
+head(data_BMI,5)
+```
+
+
+
+```{r,echo=FALSE}
+# Define BMI categories according to WHO standards
+data_BMI <- data_BMI %>%
+  mutate(BMI_Category = case_when(
+    BMI < 18.5 ~ "Underweight",
+    BMI >= 18.5 & BMI < 25.0 ~ "Normal Weight",
+    BMI >= 25.0 ~ "Overweight"
+  ))
+
+head(data_BMI)
+```
+
+```{r,echo=FALSE}
+
+# Print descriptive statistics for BMI by gender
+descriptive_stats <- data_BMI %>%
+  group_by(Gender) %>%
+  summarize(
+    Count = n(),
+    Mean_BMI = mean(BMI),
+    Median_BMI = median(BMI),
+    SD_BMI = sd(BMI),
+    Min_BMI = min(BMI),
+    Max_BMI = max(BMI)
+  )
+
+cat("\n--- DESCRIPTIVE STATISTICS BY GENDER ---\n")
+print(descriptive_stats)
+```
+
+
+
+
+
+```{r,echo=FALSE}
+# --------------------
+# SIMPLE RANDOM ANALYSIS
+# --------------------
+
+# Calculate the proportion for each BMI category
+simple_proportions <- data_BMI %>%
+  count(BMI_Category) %>%
+  mutate(Proportion = n / sum(n),
+         Percentage = Proportion * 100)
+
+# Calculate 95% confidence intervals for each proportion
+simple_ci <- data_BMI %>%
+  group_by(BMI_Category) %>%
+  summarize(
+    Count = n(),
+    Proportion = Count / nrow(data_BMI),
+    SE = sqrt(Proportion * (1 - Proportion) / nrow(data_BMI)),
+    CI_Lower = Proportion - 2 * SE,
+    CI_Upper = Proportion + 2 * SE,
+    Margin_of_Error = 2 * SE
+  )
+
+simple_ci
+```
+
+```{r,echo=FALSE}
+# Data preparation
+# Create the dataset based on the information provided
+student_data <- data.frame(
+  Student = 1:64,
+  Gender = c("F", "M", "F", "M", "M", "M", "M", "M", "F", "M", "M", "F", "F", "F", "M", "M", "M", "F", "M", "F", "M", "F", "M", "M", "M", "F", "M", "F", "F", "M", "F", "M", "F", "F", "F", "F", "F", "M", "F", "F", "M", "F", "M", "F", "F", "F", "M", "M", "F", "M", "M", "M", "F", "F", "M", "M", "F", "M", "M", "F", "F", "M", "M", "F"),
+  BMI = c(27.1, 23, 21.2, 21.2, 23.7, 25, 30.3, 24.5, 18.8, 25.8, 22.6, 24.1, 23.8, 27.5, 25.8, 23.82, 20.4, 26.3, 23.7, 24, 28.9, 24, 23.5, 20.9, 25.1, 17, 23.4, 22.6, 20.8, 27.3, 20.8, 27.3, 17.8, 20.8, 18.8, 27.1, 18.8, 23.82, 23.82, 23.8, 23.82, 28.5, 26.5, 27.5, 26.5, 28.5, 26.9, 24.8, 26.7, 24.8, 23.9, 24.8, 26.8, 25.9, 17.5, 17.8, 16.8, 24.9, 29.2, 21.1, 23.6, 27.4, 28, 23.4)
+)
+
+# Add BMI category based on the provided criteria
+student_data$BMI_Category <- cut(student_data$BMI, 
+                                 breaks = c(0, 18.5, 25, Inf), 
+                                 labels = c("Underweight", "Normal weight", "Overweight"),
+                                 right = FALSE)
+
+# Stratified sampling analysis function with corrected variance calculation
+stratified_analysis <- function(data) {
+  # Get total population size
+  N <- nrow(data)
+  
+  # Calculate stratum information
+  strata_info <- data.frame(
+    Gender = c("M", "F"),
+    N_h = c(sum(data$Gender == "M"), sum(data$Gender == "F"))
+  )
+  strata_info$W_h <- strata_info$N_h / N
+  
+  # Define BMI categories
+  bmi_categories <- levels(data$BMI_Category)
+  
+  # Initialize results dataframe
+  results <- data.frame(
+    BMI_Category = bmi_categories,
+    p_st = numeric(length(bmi_categories)),
+    Var_p_st = numeric(length(bmi_categories)),
+    SE_p_st = numeric(length(bmi_categories)),
+    Margin_Error = numeric(length(bmi_categories)),
+    CI_lower = numeric(length(bmi_categories)),
+    CI_upper = numeric(length(bmi_categories))
+  )
+  
+  # For each BMI category
+  for (i in 1:length(bmi_categories)) {
+    category <- bmi_categories[i]
+    
+    # Initialize calculation variables
+    p_st <- 0
+    var_p_st <- 0
+    
+    # For each stratum
+    for (j in 1:nrow(strata_info)) {
+      gender <- strata_info$Gender[j]
+      N_h <- strata_info$N_h[j]
+      W_h <- strata_info$W_h[j]
+      
+      # Subset data for this stratum
+      stratum_data <- data[data$Gender == gender, ]
+      n_h <- nrow(stratum_data)
+      
+      # Count number in this BMI category
+      count_in_category <- sum(stratum_data$BMI_Category == category)
+      
+      # Calculate proportion in this stratum
+      p_h <- count_in_category / n_h
+      
+      # Add to overall proportion
+      p_st <- p_st + W_h * p_h
+      
+      # Calculate variance component for this stratum
+      # Using the formula: (N_h/N)^2 * ((N_h - n_h)/N_h) * (p_h*(1-p_h)/(n_h-1))
+      # For stratified sampling with replacement, we use:
+      var_component <- (W_h^2) * (p_h * (1 - p_h) / (n_h - 1))
+      
+      # Note: In this case N_h = n_h since we're sampling the entire population within each stratum
+      # If this is just a sample, adjust accordingly with the finite population correction factor
+      var_p_st <- var_p_st + var_component
+    }
+    
+    # Store results
+    results$p_st[i] <- p_st
+    results$Var_p_st[i] <- var_p_st
+    results$SE_p_st[i] <- sqrt(var_p_st)
+    
+    # Calculate 95% margin of error and confidence intervals
+    z <- qnorm(0.975)  # 95% CI
+    results$Margin_Error[i] <- 2 * sqrt(var_p_st)
+    results$CI_lower[i] <- max(0, p_st - results$Margin_Error[i])
+    results$CI_upper[i] <- min(1, p_st + results$Margin_Error[i])
+  }
+  
+  return(list(
+    strata_info = strata_info,
+    results = results,
+    detailed_counts = table(data$Gender, data$BMI_Category)
+  ))
+}
+
+# Run analysis
+analysis_results <- stratified_analysis(student_data)
+
+# Print results
+cat("Stratified Sampling Analysis Results\n")
+cat("------------------------------------\n\n")
+
+cat("Strata Information:\n")
+print(analysis_results$strata_info)
+cat("\n")
+
+cat("Detailed Counts by Gender and BMI Category:\n")
+print(analysis_results$detailed_counts)
+cat("\n")
+
+cat("Proportion Estimates, Variance, and Margin of Error:\n")
+print(analysis_results$results)
+cat("\n")
+
+# Calculate detailed stratum-specific proportions
+cat("Stratum-specific proportions:\n")
+for (gender in c("M", "F")) {
+  cat(paste("\nGender:", gender, "\n"))
+  stratum_data <- student_data[student_data$Gender == gender, ]
+  bmi_counts <- table(stratum_data$BMI_Category)
+  bmi_props <- prop.table(bmi_counts)
+  print(bmi_props)
+}
+
+# Verification of stratified proportion calculation
+cat("\nVerification of stratified proportion calculation:\n")
+w_m <- sum(student_data$Gender == "M") / nrow(student_data)
+w_f <- sum(student_data$Gender == "F") / nrow(student_data)
+
+for (category in levels(student_data$BMI_Category)) {
+  p_m <- sum(student_data$Gender == "M" & student_data$BMI_Category == category) / sum(student_data$Gender == "M")
+  p_f <- sum(student_data$Gender == "F" & student_data$BMI_Category == category) / sum(student_data$Gender == "F")
+  p_st <- w_m * p_m + w_f * p_f
+  
+  cat(paste("BMI Category:", category, "\n"))
+  cat(paste("  Male proportion (p_m):", p_m, "\n"))
+  cat(paste("  Female proportion (p_f):", p_f, "\n"))
+  cat(paste("  Male weight (w_m):", w_m, "\n"))
+  cat(paste("  Female weight (w_f):", w_f, "\n"))
+  cat(paste("  Stratified proportion (p_st):", p_st, "\n\n"))
+  
+  # Manually calculate variance
+  var_m <- (w_m^2) * (p_m * (1 - p_m) / (sum(student_data$Gender == "M") - 1))
+  var_f <- (w_f^2) * (p_f * (1 - p_f) / (sum(student_data$Gender == "F") - 1))
+  var_st <- var_m + var_f
+  
+  cat(paste("  Variance component from males:", var_m, "\n"))
+  cat(paste("  Variance component from females:", var_f, "\n"))
+  cat(paste("  Total variance (var_st):", var_st, "\n"))
+  cat(paste("  Standard error:", sqrt(var_st), "\n"))
+  cat(paste("  95% Margin of error:", qnorm(0.975) * sqrt(var_st), "\n\n"))
+}
+
+# Visualization
+library(ggplot2)
+
+# Create data for plotting
+plot_data <- data.frame(
+  BMI_Category = analysis_results$results$BMI_Category,
+  Proportion = analysis_results$results$p_st,
+  CI_lower = analysis_results$results$CI_lower,
+  CI_upper = analysis_results$results$CI_upper
+)
+
+# Bar plot with confidence intervals
+ggplot(plot_data, aes(x = BMI_Category, y = Proportion)) +
+  geom_bar(stat = "identity", fill = "steelblue", alpha = 0.7) +
+  geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper), width = 0.2) +
+  labs(title = "Proportion Estimates by BMI Category with 95% CI",
+       x = "BMI Category",
+       y = "Proportion") +
+  theme_minimal() +
+  ylim(0, 1)
+
+# Gender-specific analysis
+gender_proportions <- data.frame(
+  Gender = c(rep("Male", 3), rep("Female", 3)),
+  BMI_Category = rep(levels(student_data$BMI_Category), 2),
+  Count = c(
+    sum(student_data$Gender == "M" & student_data$BMI_Category == "Underweight"),
+    sum(student_data$Gender == "M" & student_data$BMI_Category == "Normal weight"),
+    sum(student_data$Gender == "M" & student_data$BMI_Category == "Overweight"),
+    sum(student_data$Gender == "F" & student_data$BMI_Category == "Underweight"),
+    sum(student_data$Gender == "F" & student_data$BMI_Category == "Normal weight"),
+    sum(student_data$Gender == "F" & student_data$BMI_Category == "Overweight")
+  )
+)
+
+gender_proportions$Total <- c(
+  rep(sum(student_data$Gender == "M"), 3),
+  rep(sum(student_data$Gender == "F"), 3)
+)
+
+gender_proportions$Proportion <- gender_proportions$Count / gender_proportions$Total
+
+# Plot gender-specific proportions
+ggplot(gender_proportions, aes(x = BMI_Category, y = Proportion, fill = Gender)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "BMI Category Proportions by Gender",
+       x = "BMI Category",
+       y = "Proportion") +
+  theme_minimal() +
+  scale_fill_manual(values = c("Male" = "skyblue", "Female" = "pink"))
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
